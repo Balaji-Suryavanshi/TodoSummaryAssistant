@@ -60,7 +60,8 @@ jobs:
           script: |
             set -e
             cd /opt/todo
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
             docker compose pull backend frontend
             docker compose up -d --remove-orphans
 
