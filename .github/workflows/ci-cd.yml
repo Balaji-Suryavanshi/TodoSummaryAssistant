@@ -2,122 +2,68 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  id-token: write
-  contents: read
+    branches: ["main"]
 
 jobs:
-  backend-test:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+
       - name: Set up JDK 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'maven'
-      - name: Build and Test with Maven
-        working-directory: ./Backend/todo-summary-assistant
-        run: ./mvnw test
+          java-version: "17"
+          distribution: "temurin"
 
-  frontend-test:
+      - name: Run Backend Tests
+        run: |
+          cd Backend/todo-summary-assistant
+          mvn clean test
+
+  build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: './Frontend/todo/package-lock.json'
-      - name: Install dependencies
-        working-directory: ./Frontend/todo
-        run: npm ci
-      - name: Run Tests
-        working-directory: ./Frontend/todo
-        run: npm test -- --passWithNoTests
-      - name: Build
-        working-directory: ./Frontend/todo
-        run: npm run build
+      - uses: actions/checkout@v4
 
-  docker-build-push:
-    needs: [backend-test, frontend-test]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v3
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
-      - name: Build and push Backend
-        uses: docker/build-push-action@v4
+
+      - name: Build and Push Backend Image
+        uses: docker/build-push-action@v5
         with:
           context: ./Backend/todo-summary-assistant
           push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/todo-backend:${{ github.sha }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/todo-backend:latest
-            
-      - name: Build and push Frontend
-        uses: docker/build-push-action@v4
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/todo-backend:latest
+
+      - name: Build and Push Frontend Image
+        uses: docker/build-push-action@v5
         with:
           context: ./Frontend/todo
           push: true
-          build-args: |
-            REACT_APP_API_URL=/api/todos
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/todo-frontend:${{ github.sha }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/todo-frontend:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/todo-frontend:latest
 
   deploy:
-    needs: docker-build-push
+    needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/todo
+            git pull origin main
+            docker compose pull backend frontend
+            docker compose up -d --remove-orphans
 
-      - name: Deploy via AWS SSM
-        run: |
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["sudo mkdir -p /opt/todo", "sudo chown -R ec2-user:ec2-user /opt/todo", "if [ ! -d \"/opt/todo/.git\" ]; then git clone https://github.com/${{ github.repository }}.git /opt/todo; fi", "cd /opt/todo", "git fetch --all", "git reset --hard ${{ github.sha }}", "export IMAGE_TAG=${{ github.sha }}", "export DOCKERHUB_USER=${{ secrets.DOCKERHUB_USERNAME }}", "chmod +x aws/deploy.sh", "bash aws/deploy.sh"]}' \
-            --query "Command.CommandId" \
-            --output text)
-          
-          echo "Waiting for SSM command: $COMMAND_ID"
-          aws ssm wait command-executed \
-            --command-id "$COMMAND_ID" \
-            --instance-id "${{ secrets.EC2_INSTANCE_ID }}"
-          
-          STATUS=$(aws ssm list-command-invocations \
-            --command-id "$COMMAND_ID" \
-            --details \
-            --query "CommandInvocations[0].Status" \
-            --output text)
-            
-          if [ "$STATUS" != "Success" ]; then
-            echo "Deployment failed with status: $STATUS"
-            # Attempt to fetch stdout/stderr for debugging
-            aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
-              --query "StandardErrorContent" --output text
-            exit 1
-          fi
+            # Health verification
+            sleep 15
+            curl -f http://localhost:8080/actuator/health || exit 1
