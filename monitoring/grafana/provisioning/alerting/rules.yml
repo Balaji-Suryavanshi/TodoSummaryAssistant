@@ -1,0 +1,112 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: "Grafana Managed Alerts"
+    folder: "App Alerts"
+    interval: 60s
+    rules:
+      - uid: "app_cpu_alert"
+        title: "High CPU Alert"
+        condition: "C"
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "5m"
+        annotations:
+          summary: "High CPU usage detected via Grafana Alert"
+        labels:
+          severity: "warning"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "prometheus"
+            model:
+              expr: "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)"
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: "A"
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator: { params: [], type: gt }
+                  operator: { type: and }
+                  query: { params: ["A"] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator: { params: [80], type: gt }
+                  operator: { type: and }
+                  query: { params: ["B"] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              expression: $B > 80
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: math
+
+      - uid: "app_down_alert"
+        title: "Service Down Alert"
+        condition: "C"
+        noDataState: "OK"
+        execErrState: "Error"
+        for: "1m"
+        annotations:
+          summary: "Service is down"
+        labels:
+          severity: "critical"
+        data:
+          - refId: "A"
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "prometheus"
+            model:
+              expr: "up{job=\"backend\"}"
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: "A"
+          - refId: "B"
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator: { params: [], type: gt }
+                  operator: { type: and }
+                  query: { params: ["A"] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: "C"
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator: { params: [0], type: eq }
+                  operator: { type: and }
+                  query: { params: ["B"] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              expression: $B == 0
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: math

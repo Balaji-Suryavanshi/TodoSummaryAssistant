@@ -1,0 +1,37 @@
+graph TD
+    subagent[Developer / GitHub Actions] -->|OIDC Token| AWS_IAM(AWS IAM Role)
+    AWS_IAM -->|SSM SendCommand| EC2[EC2 Instance]
+    
+    subgraph "AWS Cloud"
+        SSM["SSM Parameter Store<br/>(Secrets)"]
+        
+        subgraph VPC
+            EC2
+            RDS[(RDS MySQL)]
+        end
+        
+        EC2 -->|Reads Params| SSM
+        EC2 -->|Reads/Writes| RDS
+        
+        subgraph "Docker Compose (EC2)"
+            Nginx["Nginx Proxy<br/>:80"]
+            React[Frontend SPA]
+            Spring["Backend API<br/>:8080"]
+            
+            Prom["Prometheus<br/>127.0.0.1:9090"]
+            Graf["Grafana<br/>127.0.0.1:3000"]
+            NodeExp[Node Exporter]
+            cAdvisor[cAdvisor]
+            
+            Nginx --> React
+            Nginx -->|/api/*| Spring
+            
+            Prom -.->|Scrapes| Spring
+            Prom -.->|Scrapes| NodeExp
+            Prom -.->|Scrapes| cAdvisor
+            Graf -.->|Queries| Prom
+        end
+        
+        Internet((Internet)) -->|HTTP 80| Nginx
+        UserAdmin((Admin)) -.->|SSM Port Forward| Graf
+    end

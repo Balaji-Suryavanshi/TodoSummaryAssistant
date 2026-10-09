@@ -1,0 +1,65 @@
+groups:
+  - name: app_alerts
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: (rate(http_server_requests_seconds_count{status=~"5.."}[5m]) or vector(0)) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate on {{ $labels.job }}"
+          description: "Over 5% of requests are returning 5xx on {{ $labels.job }} over the last 5 minutes."
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 2.0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Latency (p95) on {{ $labels.job }}"
+          description: "p95 latency is greater than 2 seconds for the last 5 minutes."
+
+      - alert: HighCPU
+        expr: 100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is above 80% for 5 minutes."
+
+      - alert: HighMemory
+        expr: (sum by(instance) (container_memory_usage_bytes) / sum by(instance) (machine_memory_bytes)) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Memory usage"
+          description: "Memory usage is above 80% for 5 minutes."
+
+      - alert: LowDisk
+        expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) * 100 < 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low Disk Space"
+          description: "Available disk space is below 20% for 5 minutes."
+
+      - alert: ContainerRestarting
+        expr: changes(container_start_time_seconds{name!=""}[15m]) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container Restarting"
+          description: "Containers are restarting frequently."
