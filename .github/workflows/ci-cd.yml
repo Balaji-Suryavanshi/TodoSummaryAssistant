@@ -62,9 +62,7 @@ jobs:
             cd /opt/todo
             git fetch origin main
             git reset --hard origin/main
-            docker compose pull backend frontend
-            docker compose up -d --remove-orphans
-
-            # Health verification
+            docker compose pull frontend backend
+            docker compose up -d --force-recreate --remove-orphans
             sleep 15
             curl -f http://localhost:8080/actuator/health || exit 1

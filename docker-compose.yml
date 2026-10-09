@@ -2,6 +2,7 @@
 
 services:
   frontend:
+    image: balajisuryavanshi/todo-frontend:latest
     build:
       context: ./Frontend/todo
       dockerfile: Dockerfile
@@ -15,6 +16,7 @@ services:
         condition: service_healthy
 
   backend:
+    image: balajisuryavanshi/todo-backend:latest
     build:
       context: ./Backend/todo-summary-assistant
       dockerfile: Dockerfile
